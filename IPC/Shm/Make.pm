@@ -3,23 +3,42 @@ use warnings;
 use strict;
 use Carp;
 #
-# makeshm( $scalar_variable_reference );
+# Copyright (c) 2014 by Kevin Cody-Little <kcody@cpan.org>
 #
-# If the referenced variable contains a plain scalar, nothing is done.
+# This code may be modified or redistributed under the terms
+# of either the Artistic or GNU General Public licenses, at
+# the modifier or redistributor's discretion.
 #
-# If the referenced variable itself contains a reference, the target of that
-# inner reference is tied into shared memory with its contents preserved.
-#
-# The inner reference is then replaced with a stand-in containing an
-# identifier, which can be used to recover the original (now tied) target.
-#
-#
-# my $tiedref = getback( $standin );
-#
-# Given the standin left by makeshm, returns a reference to the original
-# (now tied into shared memory) data. It's up to the calling program to
-# know whether it expects a scalar, array, or hash reference.
-#
+
+=head1 NAME
+
+IPC::Shm::Make
+
+=head1 SYNOPSIS
+
+This module is part of the IPC::Shm implementation. You should
+not be using it directly.
+
+=head1 FUNCTIONS
+
+=head2 makeshm( $scalar_variable_reference );
+
+If the referenced variable contains a plain scalar, nothing is done.
+
+If the referenced variable itself contains a reference, the target of that
+inner reference is tied into shared memory with its contents preserved.
+
+The inner reference is then replaced with a stand-in containing an
+identifier, which can be used to recover the original (now tied) target.
+
+=head2 getback( $standin );
+
+Given the standin left by makeshm, returns a reference to the original
+(now tied into shared memory) data. It's up to the calling program to
+know whether it expects a scalar, array, or hash reference.
+
+=cut
+
 ###############################################################################
 # library dependencies
 
@@ -137,13 +156,7 @@ sub makeshm {
 sub getback {
 	my ( $standin ) = @_;
 
-	my $share = IPC::Shm::Tied->restand( $standin )
-		or confess "failed to restand standin";
-
-	my $rv = $share->tiedref
-		or carp "BUG: tiedref is empty";
-
-	return $rv;
+	return IPC::Shm::Tied->standin_tiedref( $standin );
 }
 
 

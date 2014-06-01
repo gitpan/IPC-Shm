@@ -3,25 +3,62 @@ use warnings;
 use strict;
 use Carp;
 #
-# Attribute interface for shared memory variables.
+# Copyright (c) 2014 by Kevin Cody-Little <kcody@cpan.org>
 #
-# This is the recommended way to put variables in shared memory.
+# This code may be modified or redistributed under the terms
+# of either the Artistic or GNU General Public licenses, at
+# the modifier or redistributor's discretion.
 #
-# Synopsis:
-#
-# use IPC::Shm;
-# our $VARIABLE : shm;
-#
-# And then just use it like you would any other variable.
-# Scalars, hashes, and arrays are supported.
-# Implemented using tie().
-#
+
+=head1 NAME
+
+IPC::Shm - Easily Store Variables in SysV Shared Memory
+
+=head1 SYNOPSIS
+
+ use IPC::Shm;
+ our %variable : shm;
+
+Then, just use it like any other variable.
+
+=head1 EXPLANATION
+
+The "shm" variable attribute confers two properties:
+
+=over
+
+=item 1. The variable will persist beyond the program's end.
+
+=item 2. All simultaneous processes will see the same value.
+
+=back
+
+Scalars, hashes, and arrays are supported.
+
+Storing references is legal; however, the target of the reference will itself
+be moved into its own shared memory segment with contents preserved.
+
+Blessed references might work but are untested.
+
+=head1 LEXICALS
+
+Lexical variables are treated as anonymous, and are supported. They will only
+outlive the process if another shared variable contains a reference to it.
+
+=head1 CURRENT STATUS
+
+This is alpha code. There are no doubt many bugs.
+
+In particular, the multiple simultaneous process use case has not been tested.
+
+=cut
+
 ###############################################################################
 # library dependencies
 
 use Attribute::Handlers;
 
-our $VERSION = '0.2';
+our $VERSION = '0.30';
 
 
 ###############################################################################
@@ -96,7 +133,7 @@ sub UNIVERSAL::shm : ATTR(ANY) {
 	$sym  = _attrtie_normalize_symbol( $sym, $type );
 
 	my $segment = $sym eq 'LEXICAL'
-		? IPC::Shm::Segment->lexical( $ref )
+		? IPC::Shm::Segment->anonymous
 		: IPC::Shm::Segment->named( $sym )
 		or confess "Unable to find shm store";
 
@@ -112,7 +149,6 @@ sub UNIVERSAL::shm : ATTR(ANY) {
 		$obj = tie $$ref, 'IPC::Shm::Tied', $segment, @$data;
 	}
 
-#	$obj->reftype( $type );
 	$obj->tiedref( $ref );
 
 	if ( $sym eq '%IPC::Shm::NAMEVARS' ) {

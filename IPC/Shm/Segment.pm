@@ -2,6 +2,104 @@ package IPC::Shm::Segment;
 use warnings;
 use strict;
 use Carp;
+#
+# Copyright (c) 2014 by Kevin Cody-Little <kcody@cpan.org>
+#
+# This code may be modified or redistributed under the terms
+# of either the Artistic or GNU General Public licenses, at
+# the modifier or redistributor's discretion.
+#
+
+=head1 NAME
+
+IPC::Shm::Segment
+
+=head1 SYNOPSIS
+
+This class is part of the IPC::Shm implementation. You should probably
+not be using it directly. 
+
+=head1 CONSTRUCTORS
+
+=head2 $class->named( $varname )
+
+Attach to a named variable's segment, creating if necessary. The contents
+of the varname string are just how the variable is typed in perl code.
+
+=head2 $class->anonymous
+
+Create a new anonymous segment.
+
+=head2 $class->anonymous( $cookie )
+
+Attach to an existing anonymous segment using a cookie value.
+Those cookies might be retrieved with the varanon method,
+or might be stored in a standin. See below.
+
+=head1 ATTRIBUTES
+
+=head2 $this->varname
+
+Returns the variable's name, if any.
+
+=head2 $this->varname( $varname );
+
+Sets the variable's name.
+
+=head2 $this->varanon
+
+Returns the anonymous variable identifier cookie, if any.
+
+=head2 $this->varanon( $cookie )
+
+Sets the anonymous variable identifier cookie.
+
+=head2 $this->vartype
+
+Returns 'HASH', 'ARRAY', or 'SCALAR'.
+
+=head2 $this->vartype( $vartype )
+
+Stores the variable type. Only meaningful for anonymous segments.
+
+=head2 $this->varid
+
+Retrieves a human-redable string identifying the variable.
+
+=head1 OVERRIDDES
+
+=head2 $this->DETACH
+
+Called by IPC::Shm::Simple when the last in-process instance
+is being DESTROYed.
+
+=head1 STAND-IN REFERENCES
+
+=head2 $this->standin
+
+This is an shared memory analogue of a reference. It is stored in the
+shared memory variable that holds the reference.
+
+Returns a reference to an anonymous hash containing suitable identifiers.
+
+=head2 $class->standin_type( $standin )
+
+Returns the variable type that the standin points to.
+
+=head2 $class->standin_shmid( $standin )
+
+Returns the shmid where the standin points to.
+
+=head2 $class->standin_restand( $standin )
+
+Returns the original object that generated the standin, or
+an exactly equal copy of that object.
+
+=head2 $class->standin_discard( $standin )
+
+Indicates that the standin reference is going away.
+
+=cut
 
 ###############################################################################
 # library dependencies
@@ -56,6 +154,7 @@ sub named($$) {
 			carp "shmcreate failed: $!";
 			return undef;
 		}
+		$rv->incref;
 		$rv->unlock;
 		$IPC::Shm::NAMEVARS{$sym} = $rv->shmid;
 	}
@@ -146,6 +245,30 @@ sub vartype {
 
 
 ###############################################################################
+# disconnect-time cleanups
+
+sub DETACH {
+	my ( $this ) = @_;
+
+	unless ( $this->nrefs ) {
+		$this->CLEAR;
+		$this->remove;
+		if ( my $vanon = $this->varanon ) {
+			delete $IPC::Shm::ANONVARS{$vanon};
+			delete $IPC::Shm::ANONTYPE{$vanon};
+		}
+
+	}
+
+	$this->SUPER::DETACH();
+
+}
+
+
+###############################################################################
+###############################################################################
+
+###############################################################################
 # generate a stand-in hashref containing one identifier or another
 
 sub standin {
@@ -171,7 +294,7 @@ sub standin {
 # determine the standin variable type based on its name or cookie
 
 sub standin_type {
-	my ( $class, $standin ) = @_;
+	my ( $callclass, $standin ) = @_;
 
 	if ( my $vanon = $standin->{varanon} ) {
 		return $IPC::Shm::ANONTYPE{$vanon} || 'INVALID';
@@ -191,7 +314,7 @@ sub standin_type {
 # get back the shared memory id given a standin from above
 
 sub standin_shmid {
-	my ( $class, $standin ) = @_;
+	my ( $callclass, $standin ) = @_;
 
 	if ( my $vname = $standin->{varname} ) {
 		return $IPC::Shm::NAMEVARS{$vname};
@@ -208,7 +331,7 @@ sub standin_shmid {
 ###############################################################################
 # get back the object given a standin from above
 
-sub restand {
+sub standin_restand {
 	my ( $callclass, $standin ) = @_;
 
 	my $shmid = $callclass->standin_shmid( $standin );
@@ -237,22 +360,13 @@ sub restand {
 ###############################################################################
 # indicate a standin is being thrown away
 
-sub discard {
-	my ( $class, $standin ) = @_;
+sub standin_discard {
+	my ( $callclass, $standin ) = @_;
 
-	my $this = $class->restand( $standin )
-		or return undef;
+	my $this = $callclass->standin_restand( $standin )
+		or return;
 
 	$this->decref;
-
-	unless ( $this->nrefs ) {
-		$this->CLEAR;
-		$this->remove;
-		if ( my $vanon = $this->varanon ) {
-			delete $IPC::Shm::ANONVARS{$vanon};
-			delete $IPC::Shm::ANONTYPE{$vanon};
-		}
-	}
 
 }
 
