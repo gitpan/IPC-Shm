@@ -1,13 +1,13 @@
 # http://module-build.sourceforge.net/META-spec.html
 #XXXXXXX This is a prototype!!!  It will change in the future!!! XXXXX#
 name:         IPC-Shm
-version:      0.1
+version:      0.2
 version_from: IPC/Shm.pm
 installdirs:  site
 requires:
     Carp:                          0
-    Class::Attrib:                 0
-    IPC::Shm::Simple:              0
+    Class::Attrib:                 1.06
+    IPC::Shm::Simple:              1.04
     Storable:                      0
     UNIVERSAL:                     0
 

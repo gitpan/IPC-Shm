@@ -1,43 +1,76 @@
 package IPC::Shm::Tied::SCALAR;
 use warnings;
 use strict;
+use Carp;
 
-use base 'IPC::Shm::Tied::base';
+# Loaded from IPC::Shm::Tied, so don't reload it
+use vars qw( @ISA );
+@ISA = qw( IPC::Shm::Tied );
 
-sub _empty {
-	return \'';
+use IPC::Shm::Make;
+
+
+sub EMPTY {
+	return \undef;
 }
 
 sub TIESCALAR {
-	my ( $class, $store, @args ) = @_;
+	my ( $class, $this ) = @_;
 
-	return $class->_rebless( $store, @args );
+	return bless $this, $class;
 }
 
 sub FETCH {
 	my ( $this ) = @_;
 
-	$this->readlock;
-	$this->fetch;
-	$this->unlock;
+	my $locked = $this->readlock;
 
-	return ${$this->vcache};
+	$this->fetch;
+
+	$this->unlock if $locked;
+
+	my $rv = ${$this->vcache};
+
+	return ref( $rv ) ? getback( $rv ) : $rv;
 }
 
 sub STORE {
 	my ( $this, $value ) = @_;
 
-	$this->writelock;
+	makeshm( \$value );
+
+	my $locked = $this->writelock;
+
+	$this->fetch;
+	my $oldval = ${$this->vcache};
+
 	$this->vcache( \$value );
 	$this->flush;
-	$this->unlock;
+
+	$this->unlock if $locked;
+
+	if ( ref( $oldval ) ) {
+		$this->discard( $oldval );
+	}
 
 	return $value;
 }
 
-sub UNTIE {
+sub CLEAR {
 	my ( $this ) = @_;
-	print "untying scalar shared\n";	
+
+	my $locked = $this->writelock;
+
+	$this->fetch;
+	my $oldval = ${$this->vcache};
+
+	$this->vcache( $this->EMPTY );
+	$this->flush;
+
+	$this->unlock if $locked;
+
+	$this->discard( $oldval ) if ( $oldval and ref( $oldval ) );
+
 }
 
 

@@ -1,37 +1,54 @@
 package IPC::Shm::Tied::HASH;
 use warnings;
 use strict;
+use Carp;
 
-use base 'IPC::Shm::Tied::base';
+# Loaded from IPC::Shm::Tied, so don't reload it
+use vars qw( @ISA );
+@ISA = qw( IPC::Shm::Tied );
 
-sub _empty {
+use IPC::Shm::Make;
+
+
+sub EMPTY {
 	return {};
 }
 
 sub TIEHASH {
-	my ( $class, $store, @args ) = @_;
+	my ( $class, $this ) = @_;
 
-	return $class->_rebless( $store, @args );
+	return bless $this, $class;
 }
 
 sub FETCH {
 	my ( $this, $key ) = @_;
 
-	$this->readlock;
+	my $locked = $this->readlock;
 	$this->fetch;
-	$this->unlock;
+	$this->unlock if $locked;
 
-	return $this->vcache->{$key};
+	my $rv = $this->vcache->{$key};
+
+	return ref( $rv ) ? getback( $rv ) : $rv;	
 }
 
 sub STORE {
 	my ( $this, $key, $value ) = @_;
 
-	$this->writelock;
+	makeshm( \$value );
+
+	my $locked = $this->writelock;
+
 	$this->fetch;
-	$this->vcache->{$key} = $value;
+	my $vcache = $this->vcache;
+	my $oldval = $vcache->{$key};
+
+	$vcache->{$key} = $value;
 	$this->flush;
-	$this->unlock;
+
+	$this->unlock if $locked;
+
+	$this->discard( $oldval ) if ( $oldval and ref( $oldval ) );
 
 	return $value;
 }
@@ -39,20 +56,48 @@ sub STORE {
 sub DELETE {
 	my ( $this, $key ) = @_;
 
-	$this->writelock;
-	$this->fetch;
-	delete $this->vcache->{$key};
-	$this->flush;
-	$this->unlock;
+	my $locked = $this->writelock;
 
+	$this->fetch;
+	my $vcache = $this->vcache;
+	my $oldval = $vcache->{$key};
+
+	delete $vcache->{$key};
+	$this->flush;
+
+	$this->unlock if $locked;
+
+	$this->discard( $oldval ) if ( $oldval and ref( $oldval ) );
+
+	return;
+}
+
+sub CLEAR {
+	my ( $this ) = @_;
+
+	my $locked = $this->writelock;
+
+	$this->fetch;
+	my $vcache = $this->vcache;
+
+	$this->vcache( $this->EMPTY );
+	$this->flush;
+
+	$this->unlock if $locked;
+
+	foreach my $oldval ( values %{$vcache} ) {
+		$this->discard( $oldval ) if ( $oldval and ref( $oldval ) );
+	}
+
+	return;
 }
 
 sub EXISTS {
 	my ( $this, $key ) = @_;
 
-	$this->readlock;
+	my $locked = $this->readlock;
 	$this->fetch;
-	$this->unlock;
+	$this->unlock if $locked;
 
 	return exists $this->vcache->{$key};
 }
@@ -60,40 +105,46 @@ sub EXISTS {
 sub FIRSTKEY {
 	my ( $this ) = @_;
 
-	$this->readlock;
+	my $locked = $this->readlock;
 	$this->fetch;
-	$this->unlock;
+	$this->unlock if $locked;
 
+	my ( %index, $first, $last );
 	foreach my $key ( keys %{$this->vcache} ) {
-		return $key;
+
+		unless ( defined $first ) {
+			$first = $last = $key;
+			next;
+		}
+
+		$index{$last} = $key;
+		$last = $key;
+
 	}
 
+	return unless $first;
+
+	$index{$last} = undef if $last;
+
+	$this->{icache} = \%index;
+
+	return $first;
 }
 
 sub NEXTKEY {
 	my ( $this, $lastkey ) = @_;
-	my $found = 0;
 
-	foreach my $key ( keys %{$this->vcache} ) {
-		return $key if $found;	
-		$found = 1 if $key eq $lastkey;
-	}
-
+	return $this->{icache}->{$lastkey};
 }
 
 sub SCALAR {
 	my ( $this ) = @_;
 
-	$this->readlock;
+	my $locked = $this->readlock;
 	$this->fetch;
-	$this->unlock;
+	$this->unlock if $locked;
 
 	return scalar %{$this->vcache};
-}
-
-sub UNTIE {
-	my ( $this ) = @_;
-	print "untying hash shared\n";
 }
 
 
