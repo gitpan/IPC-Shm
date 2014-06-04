@@ -33,17 +33,27 @@ The "shm" variable attribute confers two properties:
 
 =back
 
-Scalars, hashes, and arrays are supported.
+Scalars, hashes, and arrays are supported. Filehandles and code are not.
 
 Storing references is legal; however, the target of the reference will itself
 be moved into its own anonymous shared memory segment with contents preserved.
+That is to say, the original variable the reference points at gets tied, and
+its contents restored. Thus, any other Perlish reference copying will behave
+as expected.
 
-Blessed references might work but are untested.
+Blessed references might work but are entirely untested.
 
 =head1 LEXICALS
 
+ use IPC::Shm;
+ my $lexical1 : shm;
+ my $lexical2 : shm = 'foo';
+
 Lexical variables are treated as anonymous, and are supported. They will only
 outlive the process if another shared variable contains a reference to it.
+They will be visible to child processes, and clean themselves from the system
+when the variable has gone out of scope in all connected processes. Usually,
+that means when the parent and all children have died.
 
 =head1 LOCKING
 
@@ -51,16 +61,24 @@ If you need the state of the variable to remain unchanged between two
 or more operations, the calling program should assert a lock thus:
 
  my $obj = tied %variable;
- $obj->writelock; # or readlock, if no changes will be made
+ my $locked = $obj->writelock; # or readlock, if no changes will be made
 
  $variable{foo} = "bar";
  $variable{bar} = $variable{foo};
 
- $obj->unlock;    # don't forget
+ $obj->unlock if $locked;      # don't forget
+
+If a lock is already held by another process, newer locks will block and
+wait. However, if the same process is asking for the same lock, it will
+return zero. This allows pseudo nested locking.
 
 To summarize the locking behavior, reads are prohibited while a
 writelock is in effect (and only one writelock may be held), and
 writes are prohibited while one or more readlocks are in effect.
+
+If the process exits, any held locks are released, assuming the
+exit was sufficiently clean to allow destructors to run. Something
+more severe, such as a segmentation fault, would leave stale locks.
 
 =head1 CACHING
 
@@ -77,7 +95,27 @@ array, or hash. At the lowest level, a C implementation just sees the
 serialized string. Updates can be considered atomic as reads are locked
 out during writes, and vice versa, using a SysV semaphore array.
 
-=head1 SEGMENTS AND SEMAPHORES
+=head1 PERMISSIONS
+
+SysV shared memory segments have only a user ownership. The group bits
+of its UNIX permissions refer to the owner's primary group.
+
+Currently, all users see the same shared memory namespace. This may
+change in future versions.
+
+See below for how to influence the permission bits.
+
+=head1 CLEANING UP
+
+If you wish to remove all IPC::Shm segments from the system, do this:
+
+ use IPC::Shm;
+ IPC::Shm->cleanup;
+
+Accessing shared variables is not valid after calling this, so you
+should probably only call it from an END block.
+
+=head1 IMPLEMENTATION DETAILS
 
 One SysV shared memory segment and one SysV semaphore array for locking
 are created for each Perl variable, named or anonymous.
@@ -96,14 +134,22 @@ are created:
         IPC::Shm::Tied->Mode( 0600 );
  }
 
+Storable freeze() and thaw() are used for serialization and deserialization,
+respectively.
+
+Variables are mapped using a hash table. When the next process starts,
+it attaches to that first hash table using a four byte IPCKEY. All
+other variables are mentioned directly or indirectly in that table,
+allowing transparent reconnection.
+
 =head1 CURRENT STATUS
 
 This is alpha code. There are no doubt many bugs.
 
 In particular, the multiple simultaneous process use case has not been tested.
 
-Also, the garbage collection is primitive, and there is not yet a safe way
-to remove named variables other than manually removing ALL IPC::Shm segments.
+Also, the garbage collection is a bit tenative, and removing named segments
+causes them to be cleared immediately rather than during global destruction.
 
 =cut
 
@@ -112,7 +158,7 @@ to remove named variables other than manually removing ALL IPC::Shm segments.
 
 use Attribute::Handlers;
 
-our $VERSION = '0.31';
+our $VERSION = '0.32';
 
 
 ###############################################################################
@@ -213,6 +259,13 @@ sub UNIVERSAL::shm : ATTR(ANY) {
 
 }
 
+###############################################################################
+# alias to avoid warnings during make test
+
+sub UNIVERSAL::Shm : ATTR(ANY) {
+	UNIVERSAL::shm(@_);
+}
+
 
 ###############################################################################
 # late library dependencies - after the above compiles
@@ -224,9 +277,33 @@ use IPC::Shm::Tied;
 ###############################################################################
 # shared memory variables used by this package
 
-our %NAMEVARS : shm;
-our %ANONVARS : shm;
-our %ANONTYPE : shm;
+our %NAMEVARS : Shm;
+our %ANONVARS : Shm;
+our %ANONTYPE : Shm;
+
+
+###############################################################################
+# global cleanup routine
+
+sub cleanup {
+
+	foreach my $vanon ( keys %ANONVARS ) {
+		my $shmid = $ANONVARS{$vanon};
+		my $share = IPC::Shm::Segment->shmat( $shmid );
+		   $share->remove;
+	}
+
+	foreach my $vname ( keys %NAMEVARS ) {
+		next if $vname eq '%IPC::Shm::NAMEVARS';
+		my $shmid = $NAMEVARS{$vname};
+		my $share = IPC::Shm::Segment->shmat( $shmid );
+		   $share->remove;
+	}
+
+	my $obj = tied %NAMEVARS;
+	$obj->remove;
+
+}
 
 
 ###############################################################################
