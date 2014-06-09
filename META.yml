@@ -25,4 +25,4 @@ requires:
   Scalar::Util: 0
   Storable: 0
   UNIVERSAL: 0
-version: 0.34
+version: 0.35

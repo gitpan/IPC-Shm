@@ -81,7 +81,7 @@ is being DESTROYed.
 
 =head2 $this->standin
 
-This is an shared memory analogue of a reference. It is stored in the
+This is a shared memory analogue of a reference. It is stored in the
 shared memory variable that holds the reference.
 
 Returns a reference to an anonymous hash containing suitable identifiers.
@@ -102,6 +102,8 @@ an exactly equal copy of that object.
 =head2 $class->standin_discard( $standin )
 
 Indicates that the standin reference is going away.
+
+Returns the original object as C<standin_restand>.
 
 =cut
 
@@ -386,16 +388,17 @@ sub standin_restand {
 
 
 ###############################################################################
-# indicate a standin is being thrown away
+# indicate a standin is being thrown away, and return the object
 
 sub standin_discard {
 	my ( $callclass, $standin ) = @_;
 
-	my $this = $callclass->standin_restand( $standin )
+	my $rv = $callclass->standin_restand( $standin )
 		or return;
 
-	$this->decref;
+	$rv->decref;
 
+	return $rv;
 }
 
 

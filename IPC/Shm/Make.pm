@@ -16,8 +16,8 @@ IPC::Shm::Make
 
 =head1 SYNOPSIS
 
-This module is part of the IPC::Shm implementation. You should
-not be using it directly.
+This module is part of the IPC::Shm::Tied::* implementations. You should
+definitely not be using it directly.
 
 =head1 FUNCTIONS
 
@@ -36,6 +36,10 @@ identifier, which can be used to recover the original (now tied) target.
 Given the standin left by makeshm, returns a reference to the original
 (now tied into shared memory) data. It's up to the calling program to
 know whether it expects a scalar, array, or hash reference.
+
+=head2 getback_discard( $standin );
+
+The same as C<getback> but also decrements the reference counter.
 
 =cut
 
@@ -120,31 +124,37 @@ sub makeshm {
 		if ( my $obj = tied $$refdata ) {
 			confess "Cannot store tied scalars in shared memory"
  				unless $obj->isa( 'IPC::Shm::Tied' );
-			# replace with Ref reference
+			$obj->incref;
+			$$valueref = $obj->standin;
+		} else {
+			$$valueref = _makeshm_scalar( $refdata );
 		}
-		$$valueref = _makeshm_scalar( $refdata );
 	}
 
 	elsif ( $reftype eq 'ARRAY' ) {
 		if ( my $obj = tied @$refdata ) {
 			confess "Cannot store tied arrays in shared memory"
  				unless $obj->isa( 'IPC::Shm::Tied' );
-			# replace with Ref reference
+			$obj->incref;
+			$$valueref = $obj->standin;
+		} else {
+			$$valueref = _makeshm_array( $refdata );
 		}
-		$$valueref = _makeshm_array( $refdata );
 	}
 
 	elsif ( $reftype eq 'HASH' ) {
 		if ( my $obj = tied %$refdata ) {
 			confess "Cannot store tied hashes in shared memory"
  				unless $obj->isa( 'IPC::Shm::Tied' );
-			# replace with Ref reference
+			$obj->incref;
+			$$valueref = $obj->standin;
+		} else {
+			$$valueref = _makeshm_hash( $refdata );
 		}
-		$$valueref = _makeshm_hash( $refdata );
 	}
 
 	else {
-		confess "Incompatible reference";
+		confess "Incompatible reference type $reftype";
 	}
 
 }
@@ -157,6 +167,14 @@ sub getback {
 	my ( $standin ) = @_;
 
 	return IPC::Shm::Tied->standin_tiedref( $standin );
+}
+
+sub getback_discard {
+	my ( $standin ) = @_;
+
+	my $this = IPC::Shm::Tied->standin_discard( $standin );
+
+	return $this->tiedref;
 }
 
 
